@@ -1,141 +1,242 @@
-# ===========================================================
-# SOFTWARE DE PESQUISA OPERACIONAL - SOLVER PYTHON
-# VERSÃO INTERATIVA COM MENU
-# ===========================================================
-
-from pulp import LpProblem, LpVariable, LpMaximize, LpMinimize, lpSum, PULP_CBC_CMD
+import tkinter as tk
+from tkinter import ttk, messagebox
+from pulp import LpProblem, LpVariable, LpMaximize, LpMinimize, lpSum, PULP_CBC_CMD, LpStatus
 import pandas as pd
-import matplotlib.pyplot as plt
 import os
 
+class SolverGUI:
+    def __init__(self, master):
+        self.master = master
+        master.title("Solver de Pesquisa Operacional")
+
+        # Variáveis de controle
+        self.tipo_problema = tk.StringVar(value="max")
+        self.n_var = tk.IntVar(value=4)
+        self.n_rest = tk.IntVar(value=4)
+
+        # Referências para widgets dinâmicos
+        self.obj_coef_entries = []  # entradas da função objetivo
+        self.rest_coef_entries = []  # matriz [restrição][variável]
+        self.rest_sinal_vars = []  # operadores <=, =, >=
+        self.rest_rhs_entries = []  # lado direito
+        self.folga_coef_entries = []  # coeficientes das variáveis de folga
+
+        # ---------- FRAME CONFIGURAÇÃO INICIAL ---------- 
+        frame_config = ttk.LabelFrame(master, text="1. Definir problema")
+        frame_config.pack(fill="x", padx=10, pady=10)
+
+        # Tipo de problema
+        ttk.Label(frame_config, text="Função objetivo:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ttk.Radiobutton(
+            frame_config, text="Maximizar", variable=self.tipo_problema, value="max"
+        ).grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        ttk.Radiobutton(
+            frame_config, text="Minimizar", variable=self.tipo_problema, value="min"
+        ).grid(row=0, column=2, sticky="w", padx=5, pady=5)
+
+        # Número de variáveis
+        ttk.Label(frame_config, text="Nº de variáveis de decisão:").grid(
+            row=1, column=0, sticky="w", padx=5, pady=5
+        )
+        ttk.Entry(frame_config, textvariable=self.n_var, width=5).grid(
+            row=1, column=1, sticky="w", padx=5, pady=5
+        )
+
+        # Número de restrições
+        ttk.Label(frame_config, text="Nº de restrições:").grid(
+            row=2, column=0, sticky="w", padx=5, pady=5
+        )
+        ttk.Entry(frame_config, textvariable=self.n_rest, width=5).grid(
+            row=2, column=1, sticky="w", padx=5, pady=5
+        )
+
+        ttk.Button(
+            frame_config, text="Criar modelo", command=self.criar_campos_modelo
+        ).grid(row=3, column=0, columnspan=3, pady=10)
+
+        # ---------- FRAME CAMPOS DO MODELO ----------
+        self.frame_modelo = ttk.LabelFrame(master, text="2. Definir função objetivo e restrições")
+        self.frame_modelo.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # ---------- FRAME RESULTADO ----------
+        frame_result = ttk.LabelFrame(master, text="3. Resultado")
+        frame_result.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.text_resultado = tk.Text(frame_result, height=10)
+        self.text_resultado.pack(fill="both", expand=True, padx=5, pady=5)
+
+    # ---------------------------------------------------
+    # Cria os campos de função objetivo e restrições
+    # ---------------------------------------------------
+    def criar_campos_modelo(self):
+        # Apaga conteúdo anterior do frame_modelo
+        for widget in self.frame_modelo.winfo_children():
+            widget.destroy()
+
+        self.obj_coef_entries = []
+        self.rest_coef_entries = []
+        self.rest_sinal_vars = []
+        self.rest_rhs_entries = []
+        self.folga_coef_entries = []
+
+        n_var = self.n_var.get()
+        n_rest = self.n_rest.get()
+
+        if n_var <= 0 or n_rest <= 0:
+            messagebox.showerror("Erro", "Informe números positivos de variáveis e restrições.")
+            return
+
+        # ---------- Função Objetivo ----------
+        frame_obj = ttk.LabelFrame(self.frame_modelo, text="Função Objetivo (Z)")
+        frame_obj.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(frame_obj, text="Z = ").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+        for j in range(n_var):
+            ttk.Label(frame_obj, text=f"coef x{j+1}:").grid(row=0, column=2*j+1, padx=2, pady=5)
+            entry = ttk.Entry(frame_obj, width=6)
+            entry.grid(row=0, column=2*j+2, padx=2, pady=5)
+            self.obj_coef_entries.append(entry)
+
+        # Adicionando coeficientes para as variáveis de folga (s1, s2, s3, s4)
+        frame_folga = ttk.LabelFrame(self.frame_modelo, text="Coeficientes de variáveis de folga (s1, s2, s3, s4)")
+        frame_folga.pack(fill="x", padx=5, pady=5)
+
+        for j in range(n_rest):
+            ttk.Label(frame_folga, text=f"coef s{j+1}:").grid(row=0, column=2*j+1, padx=2, pady=5)
+            entry = ttk.Entry(frame_folga, width=6)
+            entry.grid(row=0, column=2*j+2, padx=2, pady=5)
+            self.folga_coef_entries.append(entry)
+
+        # ---------- Restrições ----------
+        frame_rest = ttk.LabelFrame(self.frame_modelo, text="Restrições")
+        frame_rest.pack(fill="x", padx=5, pady=5)
+
+        # Cabeçalho
+        for j in range(n_var):
+            ttk.Label(frame_rest, text=f"x{j+1}").grid(row=0, column=j, padx=2, pady=2)
+        ttk.Label(frame_rest, text="Sinal").grid(row=0, column=n_var, padx=5, pady=2)
+        ttk.Label(frame_rest, text="Lado direito").grid(row=0, column=n_var+1, padx=5, pady=2)
+
+        for r in range(n_rest):
+            linha_entries = []
+            for j in range(n_var):
+                e = ttk.Entry(frame_rest, width=6)
+                e.grid(row=r+1, column=j, padx=2, pady=2)
+                linha_entries.append(e)
+            self.rest_coef_entries.append(linha_entries)
+
+            sinal_var = tk.StringVar(value="<=")
+            cb = ttk.Combobox(frame_rest, textvariable=sinal_var, width=4, state="readonly")
+            cb["values"] = ("<=", "=", ">=")
+            cb.grid(row=r+1, column=n_var, padx=2, pady=2)
+            self.rest_sinal_vars.append(sinal_var)
+
+            rhs_entry = ttk.Entry(frame_rest, width=8)
+            rhs_entry.grid(row=r+1, column=n_var+1, padx=2, pady=2)
+            self.rest_rhs_entries.append(rhs_entry)
+
+        # Botão Resolver
+        ttk.Button(
+            self.frame_modelo, text="Resolver modelo", command=self.resolver_modelo
+        ).pack(pady=10)
+
+    # ---------------------------------------------------
+    # Monta o modelo no PuLP e resolve
+    # ---------------------------------------------------
+    def resolver_modelo(self):
+        try:
+            n_var = self.n_var.get()
+            n_rest = self.n_rest.get()
+
+            # Lê coeficientes da função objetivo
+            coef_obj = []
+            for j in range(n_var):
+                valor = float(self.obj_coef_entries[j].get())
+                coef_obj.append(valor)
+
+            # Lê coeficientes das variáveis de folga (s1, s2, s3, s4)
+            coef_folga = []
+            for j in range(n_rest):
+                valor = float(self.folga_coef_entries[j].get())
+                coef_folga.append(valor)
+
+            # Cria modelo
+            if self.tipo_problema.get() == "max":
+                problema = LpProblem("Problema_PO", LpMaximize)
+            else:
+                problema = LpProblem("Problema_PO", LpMinimize)
+
+            # Variáveis de decisão (não negativas)
+            vars_dec = [LpVariable(f"x{j+1}", lowBound=0) for j in range(n_var)]
+            vars_folga = [LpVariable(f"s{j+1}", lowBound=0) for j in range(n_rest)]  # variáveis de folga
+
+            # Função objetivo
+            problema += lpSum(coef_obj[j] * vars_dec[j] for j in range(n_var)) - lpSum(coef_folga[j] * vars_folga[j] for j in range(n_rest)), "Funcao_Objetivo"
+
+            # Restrições
+            restricoes_texto = []
+            for r in range(n_rest):
+                coefs_r = []
+                for j in range(n_var):
+                    txt = self.rest_coef_entries[r][j].get().strip()
+                    valor = float(txt) if txt != "" else 0.0
+                    coefs_r.append(valor)
+
+                sinal = self.rest_sinal_vars[r].get()
+                rhs_txt = self.rest_rhs_entries[r].get()
+                rhs = float(rhs_txt)
+
+                expr = lpSum(coefs_r[j] * vars_dec[j] for j in range(n_var)) + vars_folga[r]  # inclui folga
+
+                if sinal == "<=":
+                    problema += expr <= rhs
+                elif sinal == ">=":
+                    problema += expr >= rhs
+                else:
+                    problema += expr == rhs
+
+                # Para exibir em texto
+                lado_esq = " + ".join([f"{coefs_r[j]}*x{j+1}" for j in range(n_var)]) + f" + s{r+1}"
+                restricoes_texto.append(f"{lado_esq} {sinal} {rhs}")
+
+            # Resolve
+            problema.solve(PULP_CBC_CMD(msg=0))
+
+            status = LpStatus[problema.status]
+            valor_obj = problema.objective.value()
+
+            # Monta saída
+            saida = []
+            saida.append("Status da solução: " + status)
+            saida.append(f"Valor ótimo da função objetivo (Z): {valor_obj}\n")
+            saida.append("Valores das variáveis de decisão:")
+            linhas_df = []
+            for v in problema.variables():
+                saida.append(f"  {v.name} = {v.value()}")
+                linhas_df.append({"Variável": v.name, "Valor ótimo": v.value()})
+            linhas_df.append({"Variável": "Z (Função Objetivo)", "Valor ótimo": valor_obj})
+
+            # Atualiza painel de texto
+            self.text_resultado.delete("1.0", tk.END)
+            self.text_resultado.insert(tk.END, "\n".join(saida))
+
+            # Salva em Excel
+            df = pd.DataFrame(linhas_df)
+            relatorio_nome = "relatorio_solver.xlsx"
+            df.to_excel(relatorio_nome, index=False)
+
+            messagebox.showinfo("Concluído", f"Modelo resolvido com sucesso!\nRelatório salvo em {os.path.abspath(relatorio_nome)}")
+
+        except ValueError as e:
+            messagebox.showerror("Erro de entrada", "Verifique se todos os campos numéricos foram preenchidos corretamente.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Ocorreu um erro ao resolver o modelo:\n{e}")
+
 # -----------------------------------------------------------
-# Função para criar e resolver o modelo
-# -----------------------------------------------------------
-def resolver_problema():
-    print("\n==========================================================")
-    print("         CRIAÇÃO DE UM NOVO PROBLEMA")
-    print("==========================================================")
-
-    # Tipo de problema
-    print("\n1️⃣ Escolha o tipo de problema:")
-    print("   [1] Maximização")
-    print("   [2] Minimização")
-    tipo = input("Digite 1 ou 2: ")
-
-    if tipo == "1":
-        problema = LpProblem("Problema_PO", LpMaximize)
-    else:
-        problema = LpProblem("Problema_PO", LpMinimize)
-
-    # Variáveis de decisão
-    n_var = int(input("\nQuantas variáveis de decisão existem? "))
-    coef_objetivo = []
-    variaveis = []
-
-    for i in range(n_var):
-        nome = f"x{i+1}"
-        var = LpVariable(nome, lowBound=0)  # não-negatividade
-        variaveis.append(var)
-        c = float(input(f"Coeficiente da variável {nome} na função objetivo: "))
-        coef_objetivo.append(c)
-
-    # Função objetivo
-    problema += lpSum([coef_objetivo[i] * variaveis[i] for i in range(n_var)]), "Função_Objetivo"
-
-    # Restrições
-    n_rest = int(input("\nQuantas restrições o problema possui? "))
-
-    for r in range(n_rest):
-        print(f"\n--- Restrição {r+1} ---")
-        coefs = []
-        for i in range(n_var):
-            c = float(input(f"Coeficiente de x{i+1}: "))
-            coefs.append(c)
-        sinal = input("Sinal da restrição (<= , = , >=): ")
-        rhs = float(input("Valor do lado direito da restrição: "))
-
-        if sinal == "<=":
-            problema += lpSum([coefs[i] * variaveis[i] for i in range(n_var)]) <= rhs
-        elif sinal == ">=":
-            problema += lpSum([coefs[i] * variaveis[i] for i in range(n_var)]) >= rhs
-        else:
-            problema += lpSum([coefs[i] * variaveis[i] for i in range(n_var)]) == rhs
-
-    print("\nModelo criado com sucesso! Resolvendo...\n")
-
-    # Resolver
-    problema.solve(PULP_CBC_CMD(msg=0))
-
-    print("Status:", problema.status)
-    print("Valor ótimo (função objetivo):", problema.objective.value())
-
-    print("\nValores das variáveis:")
-    for v in problema.variables():
-        print(f"{v.name} = {v.value()}")
-
-    # Criar DataFrame de resultado
-    dados = {
-        "Variável": [v.name for v in problema.variables()],
-        "Valor ótimo": [v.value() for v in problema.variables()]
-    }
-    df = pd.DataFrame(dados)
-    df.loc[len(df)] = ["Função Objetivo", problema.objective.value()]
-    df.to_excel("relatorio_solver.xlsx", index=False)
-
-    # Gráfico
-    plt.figure()
-    plt.bar(df["Variável"], df["Valor ótimo"], color="teal")
-    plt.title("Resultados do Modelo - Solver Python")
-    plt.xlabel("Variáveis")
-    plt.ylabel("Valor ótimo")
-    plt.tight_layout()
-    plt.show()
-
-    print("\n✅ Relatório salvo como 'relatorio_solver.xlsx'")
-    print("==========================================================\n")
-
-
-# -----------------------------------------------------------
-# Função para visualizar relatório existente
-# -----------------------------------------------------------
-def ver_relatorio():
-    if not os.path.exists("relatorio_solver.xlsx"):
-        print("\n⚠️ Nenhum relatório encontrado! Resolva um problema primeiro.\n")
-        return
-    df = pd.read_excel("relatorio_solver.xlsx")
-    print("\nÚltimo relatório salvo:\n")
-    print(df)
-    print("\nValor ótimo:", df.loc[df['Variável'] == 'Função Objetivo', 'Valor ótimo'].values[0])
-
-
-# -----------------------------------------------------------
-# Menu principal
-# -----------------------------------------------------------
-def menu():
-    while True:
-        print("\n==========================================================")
-        print("        SOFTWARE DE PESQUISA OPERACIONAL - SOLVER")
-        print("==========================================================")
-        print("[1] Criar e resolver novo problema")
-        print("[2] Ver último relatório salvo")
-        print("[3] Sair")
-        print("==========================================================")
-
-        opcao = input("Escolha uma opção: ")
-
-        if opcao == "1":
-            resolver_problema()
-        elif opcao == "2":
-            ver_relatorio()
-        elif opcao == "3":
-            print("\nEncerrando o programa... 👋\n")
-            break
-        else:
-            print("\nOpção inválida! Tente novamente.\n")
-
-
-# -----------------------------------------------------------
-# Execução do programa
+# Execução
 # -----------------------------------------------------------
 if __name__ == "__main__":
-    menu()
+    root = tk.Tk()
+    app = SolverGUI(root)
+    root.mainloop()
